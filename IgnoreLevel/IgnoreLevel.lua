@@ -3,6 +3,7 @@
 WhiteList = {}
 LevelBoundary = 10
 Debug = 0
+Quotes = 0
 
 local queue = {}
 local sendWhoQueue = {}
