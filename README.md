@@ -14,4 +14,5 @@ Usage:
   * /ignorewhitelist del \<name\> - removes name from white list
   * /ignorewhitelist - prints whitelist
 * /ignoredebug 0 or 1 to turn on/off filter debug messages.
+* /ignorequotes 0 or 1 to turn on/off motivational quotes that replace the whisper messages.
 
