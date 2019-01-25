@@ -16,59 +16,66 @@ local cacheTime = 60 -- time to keep a player's level in cache (sec)
 -- Regular callback listener for OnUpdate
 FRAME = CreateFrame("FRAME")
 FRAME:SetScript("OnUpdate",
-        function(...)
-                if (GetTime() - lastWhoCheck >= whoCheckCooldown and next(sendWhoQueue)) then
-                        lastWhoCheck = GetTime()
-                        SendWho(table.concat(sendWhoQueue, " "))
-                        sendWhoQueue = {}
-                end
-        end
+        function(self, elapsed)
+		self.elapsed = (self.elapsed or 0) + elapsed
+		local time = GetTime()
+		if (time - lastWhoCheck >= whoCheckCooldown and next(sendWhoQueue)) then
+			lastWhoCheck = time
+			local s = ""
+			for i = 1, 2 do
+				if (next(sendWhoQueue) == nil) then
+					break
+				end
+				s = s .. table.remove(sendWhoQueue)
+				if (i < 2) then
+					s = s .. " "
+				end
+			end
+			SetWhoToUI(0)
+			SendWho(s)
+		end
+		-- sanity check in case some queue'd names never dequeued
+		if (self.elapsed >= 10) then
+			self.elapsed = 0
+
+			for name, tbl in pairs(queue) do
+				if (time - tbl["time"] > lastWhoTimeout and tbl["level"] == nil) then
+					-- never dequeued, requeue to sendWho
+					tbl["time"] = time
+					queue[name] = tbl
+					table.insert(sendWhoQueue, name)
+				end
+			end
+		end
+	end
 )
 
 -- Need to override ElvUI and default Blizzard frame functions
 -- If there is a better way to do this, that would be great...
 local orig_ChatFrame_OnEvent
 local CH
-local _self
-local _chat
-local _arg1
-local _arg2
-local _arg3
-local _arg4
-local _arg5
-local _arg6
-local _arg7
-local _arg8
-local _arg9
-local _arg10
-local _arg11
-local _isHistory
-local _historyTime
-local _historyName
 if (ElvUI) then
         local E, L, V, P, G = unpack(ElvUI)
 	CH = E:GetModule("Chat")
 	orig_ChatFrame_OnEvent = CH.ChatFrame_MessageEventHandler
 	CH.ChatFrame_MessageEventHandler = 
 		function(self, chat, event, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, isHistory, historyTime, historyName)
-			_self = self
-			_chat = chat
-			_event = event
-			_arg1 = arg1
-			_arg2 = arg2
-			_arg3 = arg3
-			_arg4 = arg4
-			_arg5 = arg5
-			_arg6 = arg6
-			_arg7 = arg7
-			_arg8 = arg8
-			_arg9 = arg9
-			_arg10 = arg10
-			_arg11 = arg11
-			_isHistory = isHistory
-			_historyTime = historyTime
-			_historyName = historyName
-			IgnoreLevel_handler(event, arg2, arg1)
+			local args = {}
+			args["self"] = self
+			args["chat"] = chat
+			args["arg3"] = arg3
+			args["arg4"] = arg4
+			args["arg5"] = arg5
+			args["arg6"] = arg6
+			args["arg7"] = arg7
+			args["arg8"] = arg8
+			args["arg9"] = arg9
+			args["arg10"] = arg10
+			args["arg11"] = arg11
+			args["isHistory"] = isHistory
+			args["historyTime"] = historyTime
+			args["historyName"] = historyName
+			IgnoreLevel_handler(event, arg2, arg1, args)
 		end
 else
 	orig_ChatFrame_OnEvent = ChatFrame_OnEvent
@@ -84,19 +91,26 @@ local function shouldFilter(name)
         return WhiteList[strlower(name)] == nil and tbl["level"] > 0 and tbl["level"] <= LevelBoundary
 end
 
-local function onNewUserWhisper(name, message)
-        local tbl = {}
-        tbl["time"] = GetTime()
-        tbl["messages"] = {}
-        table.insert(tbl["messages"], message)
-        queue[name] = tbl
-        table.insert(sendWhoQueue, name)
-        -- Actual sending of who command will be handled in timer
+local function onNewUserWhisper(name, message, args)
+	local tbl = {}
+	tbl["time"] = GetTime()
+	tbl["messages"] = {}
+	local messageTuple = {}
+	messageTuple["message"] = message
+	messageTuple["args"] = args
+	table.insert(tbl["messages"], messageTuple)
+	queue[name] = tbl
+	table.insert(sendWhoQueue, name)
+	-- Actual sending of who command will be handled in timer
 end
 
-local function insertMessage(event, name, message)
+local function insertMessage(event, name, message, args)
 	if (ElvUI) then
-		orig_ChatFrame_OnEvent(_self, _chat, event, message, name, _arg3, _arg4, _arg5, _arg6, _arg7, _arg8, _arg9, _arg10, _arg11, _isHistory, _historyTime, _historyName)
+		orig_ChatFrame_OnEvent(args["self"], args["chat"], event, message, name,
+			args["arg3"], args["arg4"], args["arg5"], args["arg6"], args["arg7"],
+			args["arg8"], args["arg9"], args["arg10"], args["arg11"],
+			args["isHistory"], args["historyTime"], args["historyName"]
+		)
 	else
 		arg1 = message
 		arg2 = name
@@ -104,7 +118,7 @@ local function insertMessage(event, name, message)
 	end
 end
 
-function IgnoreLevel_handler(event, name, message)
+function IgnoreLevel_handler(event, name, message, args)
 	if (event == "CHAT_MSG_SYSTEM" and type(message) == "string") then
 		local name, level = string.match(message, "|Hplayer:(%a+)|h%[%a+%]|h: Level (%d+)")
 		if (name and level) then
@@ -116,14 +130,15 @@ function IgnoreLevel_handler(event, name, message)
 						DEFAULT_CHAT_FRAME:AddMessage("Ignore Level Debug - Ignoring " .. name .. " - Received who as low level.")
 					end
 				else
-					for _, message in ipairs(queue[name]["messages"]) do
-						insertMessage("CHAT_MSG_WHISPER", name, message)
+
+					for _, messageTuple in ipairs(queue[name]["messages"]) do
+						insertMessage("CHAT_MSG_WHISPER", name, messageTuple["message"], messageTuple["args"])
 					end
 				end
 				queue[name]["messages"] = {}
 			else
 				-- Not our request, pass through
-				insertMessage(event, name, message)
+				insertMessage(event, name, message, args)
 			end
 		else
 			local players = string.match(message, "(%d+) |4player:player[s]?; total")
@@ -133,29 +148,32 @@ function IgnoreLevel_handler(event, name, message)
 					-- script check recently, so should filter it out
 				else
 					-- Seems last who check wasn't by us, pass through
-					insertMessage(event, name, message)
+					insertMessage(event, name, message, args)
 				end
 				lastWhoCheck = GetTime()
 			else
 				-- Irrelevant message, pass through
-				insertMessage(event, name, message)
+				insertMessage(event, name, message, args)
 			end
 		end
 	elseif (event == "CHAT_MSG_WHISPER" and type(name) == "string" and type(message) == "string") then
 		if (name == UnitName("player") or WhiteList[strlower(name)]) then
 			-- Whitelisted
-			insertMessage(event, name, message)
+			insertMessage(event, name, message, args)
 		elseif (queue[name]) then
 			-- Already has user information
 			local tbl = queue[name]
 			if (tbl["level"] == nil) then
 				-- Already fired /who but haven't gotten response, add to list
-				table.insert(tbl["messages"], message)
+				local messageTuple = {}
+				messageTuple["message"] = message
+				messageTuple["args"] = args
+				table.insert(tbl["messages"], messageTuple)
 			else
 				-- Has level, check if stale
 				if (GetTime() - tbl["time"] > cacheTime) then
 					-- stale level
-					onNewUserWhisper(name, message)
+					onNewUserWhisper(name, message, args)
 				else
 					-- can use cached level
 					if (shouldFilter(name)) then
@@ -163,16 +181,16 @@ function IgnoreLevel_handler(event, name, message)
 							DEFAULT_CHAT_FRAME:AddMessage("Ignore Level Debug - Ignoring " .. name .. " - Cached as low level.")
 						end
 					else
-						insertMessage(event, name, message)
+						insertMessage(event, name, message, args)
 					end
 				end
 			end
 		else
 			-- New user whisper
-			onNewUserWhisper(name, message)
+			onNewUserWhisper(name, message, args)
 		end
 	else		
-		insertMessage(event, name, message)
+		insertMessage(event, name, message, args)
 	end
 end
 
@@ -214,7 +232,6 @@ end
 
 SLASH_IGNOREDEBUG1 = "/ignoredebug"
 SlashCmdList["IGNOREDEBUG"] = function(arg)
-	DEFAULT_CHAT_FRAME:AddMessage(_G["CHAT_MSG_SAY"] ~= nil)
 	if (arg and tonumber(arg)) then
 		if (tonumber(arg) == 1) then
 			Debug = 1
