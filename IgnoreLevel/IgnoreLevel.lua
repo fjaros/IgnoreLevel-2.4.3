@@ -6,7 +6,8 @@ Debug = 0
 
 local queue = {}
 local sendWhoQueue = {}
-local lastWhoCheck = 0
+local currentWhoCheck = {}
+local lastWhoCheck = GetTime() -- set as GetTime() to give server time to add a freshly logging in player to who list
 local lastWhoTimeout = 5 -- time to label the who request as from us (sec)
 local whoCheckCooldown = 10 -- time to wait between /who requests (sec)
 local cacheTime = 60 -- time to keep a player's level in cache (sec)
@@ -26,7 +27,9 @@ FRAME:SetScript("OnUpdate",
 				if (next(sendWhoQueue) == nil) then
 					break
 				end
-				s = s .. table.remove(sendWhoQueue)
+				local name = table.remove(sendWhoQueue)
+				currentWhoCheck[name] = true
+				s = s .. name
 				if (i < 2) then
 					s = s .. " "
 				end
@@ -34,30 +37,18 @@ FRAME:SetScript("OnUpdate",
 			SetWhoToUI(0)
 			SendWho(s)
 		end
-		-- sanity check in case some queue'd names never dequeued
-		if (self.elapsed >= 10) then
-			self.elapsed = 0
-
-			for name, tbl in pairs(queue) do
-				if (time - tbl["time"] > lastWhoTimeout and tbl["level"] == nil) then
-					-- never dequeued, requeue to sendWho
-					tbl["time"] = time
-					queue[name] = tbl
-					table.insert(sendWhoQueue, name)
-				end
-			end
-		end
 	end
 )
 
--- Need to override ElvUI and default Blizzard frame functions
--- If there is a better way to do this, that would be great...
-local orig_ChatFrame_MessageEventHandler
-local CH
+-- Need to override chat handling functions.
+-- Current status - ElvUI needs to override CH.ChatFrame_MessageEventHandler
+-- For Prat ChatFrame_MessageEventHandler does not behave well, need to override ChatFrame_OnEvent
+-- For default blizzard UI ChatFrame_OnEvent or ChatFrame_MessageEventHandler work
+local orig_Chat_handler
 if (ElvUI) then
         local E, L, V, P, G = unpack(ElvUI)
-	CH = E:GetModule("Chat")
-	orig_ChatFrame_MessageEventHandler = CH.ChatFrame_MessageEventHandler
+	local CH = E:GetModule("Chat")
+	orig_Chat_handler = CH.ChatFrame_MessageEventHandler
 	CH.ChatFrame_MessageEventHandler = 
 		function(self, chat, event, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, isHistory, historyTime, historyName)
 			local args = {}
@@ -78,11 +69,11 @@ if (ElvUI) then
 			IgnoreLevel_handler(event, arg2, arg1, args)
 		end
 else
-	orig_ChatFrame_MessageEventHandler = ChatFrame_MessageEventHandler
-	ChatFrame_MessageEventHandler =
+	orig_Chat_handler = ChatFrame_OnEvent
+	ChatFrame_OnEvent =
 		function(event)
 			local args = {}
-			args["this"] = this
+			args["chat"] = this
 			args["arg3"] = arg3
 			args["arg4"] = arg4
 			args["arg5"] = arg5
@@ -115,13 +106,13 @@ end
 
 local function insertMessage(event, name, message, args)
 	if (ElvUI) then
-		orig_ChatFrame_MessageEventHandler(args["self"], args["chat"], event, message, name,
+		orig_Chat_handler(args["self"], args["chat"], event, message, name,
 			args["arg3"], args["arg4"], args["arg5"], args["arg6"], args["arg7"],
 			args["arg8"], args["arg9"], args["arg10"], args["arg11"],
 			args["isHistory"], args["historyTime"], args["historyName"]
 		)
 	else
-		this = args["this"]
+		this = args["chat"]
 		arg1 = message
 		arg2 = name
 		arg3 = args["arg3"]
@@ -131,7 +122,7 @@ local function insertMessage(event, name, message, args)
 		arg7 = args["arg7"]
 		arg8 = args["arg8"]
 		arg9 = args["arg9"]
-		orig_ChatFrame_MessageEventHandler(event)
+		orig_Chat_handler(event)
 	end
 end
 
@@ -141,10 +132,11 @@ function IgnoreLevel_handler(event, name, message, args)
 		if (name and level) then
 			local isOurRequest = GetTime() - lastWhoCheck < lastWhoTimeout
 			if (queue[name] and isOurRequest) then
+				currentWhoCheck[name] = nil
 				queue[name]["level"] = tonumber(level)
 				if (shouldFilter(name)) then
 					if (Debug == 1) then
-						DEFAULT_CHAT_FRAME:AddMessage("Ignore Level Debug - Ignoring " .. name .. " - Received who as low level.")
+						args["chat"]:AddMessage("Ignore Level Debug - Ignoring " .. name .. " - Received who as low level.")
 					end
 				else
 
@@ -163,6 +155,14 @@ function IgnoreLevel_handler(event, name, message, args)
 				local num = tonumber(players)
 				if (GetTime() - lastWhoCheck < lastWhoTimeout) then
 					-- script check recently, so should filter it out
+					-- remove any offline names for which we didn't get who response
+					for k, _ in pairs(currentWhoCheck) do
+						if (Debug == 1) then
+							args["chat"]:AddMessage("Ignore Level Debug - Ignoring " .. k .. " - Did not receive who response.")
+						end
+						queue[k] = nil
+					end
+					currentWhoCheck = {}
 				else
 					-- Seems last who check wasn't by us, pass through
 					insertMessage(event, name, message, args)
@@ -174,7 +174,8 @@ function IgnoreLevel_handler(event, name, message, args)
 			end
 		end
 	elseif (event == "CHAT_MSG_WHISPER" and type(name) == "string" and type(message) == "string") then
-		if (name == UnitName("player") or WhiteList[strlower(name)]) then
+		-- Just WhiteList ElvUI history. We cannot query level if player is already offline.
+		if (name == UnitName("player") or WhiteList[strlower(name)] or (args["isHistory"] == "ElvUI_ChatHistory")) then
 			-- Whitelisted
 			insertMessage(event, name, message, args)
 		elseif (queue[name]) then
@@ -195,7 +196,7 @@ function IgnoreLevel_handler(event, name, message, args)
 					-- can use cached level
 					if (shouldFilter(name)) then
 						if (Debug == 1) then
-							DEFAULT_CHAT_FRAME:AddMessage("Ignore Level Debug - Ignoring " .. name .. " - Cached as low level.")
+							args["chat"]:AddMessage("Ignore Level Debug - Ignoring " .. name .. " - Cached as low level.")
 						end
 					else
 						insertMessage(event, name, message, args)
