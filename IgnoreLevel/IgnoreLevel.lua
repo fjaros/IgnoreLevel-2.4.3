@@ -52,12 +52,12 @@ FRAME:SetScript("OnUpdate",
 
 -- Need to override ElvUI and default Blizzard frame functions
 -- If there is a better way to do this, that would be great...
-local orig_ChatFrame_OnEvent
+local orig_ChatFrame_MessageEventHandler
 local CH
 if (ElvUI) then
         local E, L, V, P, G = unpack(ElvUI)
 	CH = E:GetModule("Chat")
-	orig_ChatFrame_OnEvent = CH.ChatFrame_MessageEventHandler
+	orig_ChatFrame_MessageEventHandler = CH.ChatFrame_MessageEventHandler
 	CH.ChatFrame_MessageEventHandler = 
 		function(self, chat, event, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, isHistory, historyTime, historyName)
 			local args = {}
@@ -78,10 +78,19 @@ if (ElvUI) then
 			IgnoreLevel_handler(event, arg2, arg1, args)
 		end
 else
-	orig_ChatFrame_OnEvent = ChatFrame_OnEvent
-	ChatFrame_OnEvent = 
+	orig_ChatFrame_MessageEventHandler = ChatFrame_MessageEventHandler
+	ChatFrame_MessageEventHandler =
 		function(event)
-			IgnoreLevel_handler(event, arg2, arg1)
+			local args = {}
+			args["this"] = this
+			args["arg3"] = arg3
+			args["arg4"] = arg4
+			args["arg5"] = arg5
+			args["arg6"] = arg6
+			args["arg7"] = arg7
+			args["arg8"] = arg8
+			args["arg9"] = arg9
+			IgnoreLevel_handler(event, arg2, arg1, args)
 		end
 end
 
@@ -106,15 +115,23 @@ end
 
 local function insertMessage(event, name, message, args)
 	if (ElvUI) then
-		orig_ChatFrame_OnEvent(args["self"], args["chat"], event, message, name,
+		orig_ChatFrame_MessageEventHandler(args["self"], args["chat"], event, message, name,
 			args["arg3"], args["arg4"], args["arg5"], args["arg6"], args["arg7"],
 			args["arg8"], args["arg9"], args["arg10"], args["arg11"],
 			args["isHistory"], args["historyTime"], args["historyName"]
 		)
 	else
+		this = args["this"]
 		arg1 = message
 		arg2 = name
-		orig_ChatFrame_OnEvent(event)
+		arg3 = args["arg3"]
+		arg4 = args["arg4"]
+		arg5 = args["arg5"]
+		arg6 = args["arg6"]
+		arg7 = args["arg7"]
+		arg8 = args["arg8"]
+		arg9 = args["arg9"]
+		orig_ChatFrame_MessageEventHandler(event)
 	end
 end
 
