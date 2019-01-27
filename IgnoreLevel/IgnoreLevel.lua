@@ -14,8 +14,101 @@ local cacheTime = 60 -- time to keep a player's level in cache (sec)
 
 
 -- HOOKS
--- Regular callback listener for OnUpdate
+-- We cannot use ChatFrame_AddMessageEventFilter API because ElvUI does not pass self/chatframe context to this function
+-- When we decide on who response whether or not to allow the message, we will not know which chatframe to send it to.
+IgnoreLevel_defaultHandler =
+	function(event)
+		local args = {}
+		if (WIM_MessageEventHandler) then
+			args["chat"] = DEFAULT_CHAT_FRAME
+		else
+			args["chat"] = this
+		end
+		args["arg3"] = arg3
+		args["arg4"] = arg4
+		args["arg5"] = arg5
+		args["arg6"] = arg6
+		args["arg7"] = arg7
+		args["arg8"] = arg8
+		args["arg9"] = arg9
+		IgnoreLevel_handler(event, arg2, arg1, args)
+	end
+local orig_Chat_handler = ChatFrame_OnEvent
+ChatFrame_OnEvent = IgnoreLevel_defaultHandler
+
+
+local function parseWhoMessage(message)
+	return string.match(message, "|Hplayer:(%a+)|h%[%a+%]|h: Level (%d+)")
+end
+
+local function parsePlayersMessage(message)
+	return string.match(message, "(%d+) |4player:player[s]?; total")
+end
+
+
+local isHooked
+local function IgnoreLevel_tryHook()
+	if (isHooked) then
+		return
+	end
+
+	if (ElvUI) then
+		-- found ElvUI
+	        local E, L, V, P, G = unpack(ElvUI)
+		local CH = E:GetModule("Chat")
+		ChatFrame_OnEvent = orig_Chat_handler
+		orig_Chat_handler = CH.ChatFrame_MessageEventHandler
+		CH.ChatFrame_MessageEventHandler =
+			function(self, chat, event, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, isHistory, historyTime, historyName)
+				local args = {}
+				args["self"] = self
+				args["chat"] = chat
+				args["arg3"] = arg3
+				args["arg4"] = arg4
+				args["arg5"] = arg5
+				args["arg6"] = arg6
+				args["arg7"] = arg7
+				args["arg8"] = arg8
+				args["arg9"] = arg9
+				args["arg10"] = arg10
+				args["arg11"] = arg11
+				args["isHistory"] = isHistory
+				args["historyTime"] = historyTime
+				args["historyName"] = historyName
+				IgnoreLevel_handler(event, arg2, arg1, args)
+			end
+		isHooked = true
+	elseif (WIM_MessageEventHandler) then
+		-- found WIM
+		ChatFrame_OnEvent = orig_Chat_handler
+		orig_Chat_handler = WIM_MessageEventHandler
+		WIM_MessageEventHandler = IgnoreLevel_defaultHandler
+		local orig_WIM_ChatFrame_MessageEventFilter_SYSTEM = WIM_ChatFrame_MessageEventFilter_SYSTEM
+		WIM_ChatFrame_MessageEventFilter_SYSTEM =
+			function(message)
+				if (GetTime() - lastWhoCheck < 1) then
+					-- need to filter out so doesn't display in default window
+					local name, level = parseWhoMessage(message)
+					if (name and level) then
+						return true, msg
+					end
+
+					local players = parsePlayersMessage(message)
+					if (players) then
+						return true, msg
+					end
+				end
+				return orig_WIM_ChatFrame_MessageEventFilter_SYSTEM(message)
+			end
+		isHooked = true
+	end
+end
+
 FRAME = CreateFrame("FRAME")
+FRAME:RegisterEvent("ADDON_LOADED")
+FRAME:SetScript("OnEvent", IgnoreLevel_tryHook)
+
+-- Regular callback listener for OnUpdate
 FRAME:SetScript("OnUpdate",
         function(self, elapsed)
 		self.elapsed = (self.elapsed or 0) + elapsed
@@ -37,54 +130,22 @@ FRAME:SetScript("OnUpdate",
 			SetWhoToUI(0)
 			SendWho(s)
 		end
+
+		-- sanity check in case some queue'd names never dequeued
+		if (self.elapsed >= 10) then
+			self.elapsed = 0
+
+			for name, tbl in pairs(queue) do
+				if (time - tbl["time"] > lastWhoTimeout and tbl["level"] == nil) then
+					-- never dequeued, requeue to sendWho
+					tbl["time"] = time
+					queue[name] = tbl
+					table.insert(sendWhoQueue, name)
+				end
+			end
+		end
 	end
 )
-
--- Need to override chat handling functions.
--- Current status - ElvUI needs to override CH.ChatFrame_MessageEventHandler
--- For Prat ChatFrame_MessageEventHandler does not behave well, need to override ChatFrame_OnEvent
--- For default blizzard UI ChatFrame_OnEvent or ChatFrame_MessageEventHandler work
-local orig_Chat_handler
-if (ElvUI) then
-        local E, L, V, P, G = unpack(ElvUI)
-	local CH = E:GetModule("Chat")
-	orig_Chat_handler = CH.ChatFrame_MessageEventHandler
-	CH.ChatFrame_MessageEventHandler = 
-		function(self, chat, event, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, isHistory, historyTime, historyName)
-			local args = {}
-			args["self"] = self
-			args["chat"] = chat
-			args["arg3"] = arg3
-			args["arg4"] = arg4
-			args["arg5"] = arg5
-			args["arg6"] = arg6
-			args["arg7"] = arg7
-			args["arg8"] = arg8
-			args["arg9"] = arg9
-			args["arg10"] = arg10
-			args["arg11"] = arg11
-			args["isHistory"] = isHistory
-			args["historyTime"] = historyTime
-			args["historyName"] = historyName
-			IgnoreLevel_handler(event, arg2, arg1, args)
-		end
-else
-	orig_Chat_handler = ChatFrame_OnEvent
-	ChatFrame_OnEvent =
-		function(event)
-			local args = {}
-			args["chat"] = this
-			args["arg3"] = arg3
-			args["arg4"] = arg4
-			args["arg5"] = arg5
-			args["arg6"] = arg6
-			args["arg7"] = arg7
-			args["arg8"] = arg8
-			args["arg9"] = arg9
-			IgnoreLevel_handler(event, arg2, arg1, args)
-		end
-end
-
 
 local function shouldFilter(name)
         local tbl = queue[name]
@@ -126,13 +187,15 @@ local function insertMessage(event, name, message, args)
 	end
 end
 
+
 function IgnoreLevel_handler(event, name, message, args)
 	if (event == "CHAT_MSG_SYSTEM" and type(message) == "string") then
-		local name, level = string.match(message, "|Hplayer:(%a+)|h%[%a+%]|h: Level (%d+)")
+		local name, level = parseWhoMessage(message)
 		if (name and level) then
 			local isOurRequest = GetTime() - lastWhoCheck < lastWhoTimeout
 			if (queue[name] and isOurRequest) then
 				currentWhoCheck[name] = nil
+				queue[name]["time"] = GetTime()
 				queue[name]["level"] = tonumber(level)
 				if (shouldFilter(name)) then
 					if (Debug == 1) then
@@ -150,7 +213,7 @@ function IgnoreLevel_handler(event, name, message, args)
 				insertMessage(event, name, message, args)
 			end
 		else
-			local players = string.match(message, "(%d+) |4player:player[s]?; total")
+			local players = parsePlayersMessage(message)
 			if (players) then
 				local num = tonumber(players)
 				if (GetTime() - lastWhoCheck < lastWhoTimeout) then
@@ -211,6 +274,7 @@ function IgnoreLevel_handler(event, name, message, args)
 		insertMessage(event, name, message, args)
 	end
 end
+
 
 SLASH_IGNORELEVEL1 = "/ignorelevel"
 SlashCmdList["IGNORELEVEL"] = function(arg)
