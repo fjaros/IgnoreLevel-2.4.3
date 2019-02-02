@@ -238,7 +238,11 @@ function IgnoreLevel_handler(event, name, message, args)
 		end
 	elseif (event == "CHAT_MSG_WHISPER" and type(name) == "string" and type(message) == "string") then
 		-- Just WhiteList ElvUI history. We cannot query level if player is already offline.
-		if (name == UnitName("player") or WhiteList[strlower(name)] or (args["isHistory"] == "ElvUI_ChatHistory")) then
+		if (name == UnitName("player")
+			or WhiteList[strlower(name)]
+			or args["isHistory"] == "ElvUI_ChatHistory"
+			or string.len(name) < 4
+		) then
 			-- Whitelisted
 			insertMessage(event, name, message, args)
 		elseif (queue[name]) then
