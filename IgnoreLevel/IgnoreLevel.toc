@@ -2,6 +2,6 @@
 ## Interface: 20400
 ## Notes: Ignores messages from users based on their in game level
 ## Version: 1.0
-## SavedVariables: LevelBoundary, WhiteList, Debug
+## SavedVariables: LevelBoundary, IgnoreParty, WhiteList, Debug
 
 IgnoreLevel.lua

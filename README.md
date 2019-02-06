@@ -10,6 +10,7 @@ Caveat: On ElvUI, chat history will not be filtered and therefore some old ignor
 
 Usage:
 * /ignorelevel 10 - Will filter out messages from characters that are level 10 or below.
+* /ignoreparty 0 or 1 to turn on/off party invites that are below set level boundary (enabled by default).
 * /ignorewhitelist
   * /ignorewhitelist add \<name\> - adds name to white list (will never filter out messages)
   * /ignorewhitelist del \<name\> - removes name from white list
