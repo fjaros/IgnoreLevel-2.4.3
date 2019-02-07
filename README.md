@@ -1,5 +1,6 @@
 # IgnoreLevel-2.4.3
-AddOn for World of Warcraft 2.4.3 to filter out whispers by character level.
+AddOn for World of Warcraft 2.4.3 to filter out messages by character level.
+It works on emote, say, whisper, and yell message types. **However it does not support channels.**
 
 **After downloading, extract ONLY the IgnoreLevel folder into your AddOns folder.**
 
