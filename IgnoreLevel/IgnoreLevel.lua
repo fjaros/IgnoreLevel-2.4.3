@@ -215,11 +215,12 @@ FRAME:SetScript("OnUpdate",
 )
 
 
-local function onNewUserWhisper(name, message, args)
+local function onNewUserWhisper(event, name, message, args)
 	local tbl = {}
 	tbl["time"] = GetTime()
 	tbl["messages"] = {}
 	local messageTuple = {}
+	messageTuple["event"] = event
 	messageTuple["message"] = message
 	messageTuple["args"] = args
 	table.insert(tbl["messages"], messageTuple)
@@ -250,7 +251,11 @@ local function insertMessage(event, name, message, args)
 	end
 end
 
-
+local eventFilterTable = {}
+eventFilterTable["CHAT_MSG_EMOTE"] = true
+eventFilterTable["CHAT_MSG_SAY"] = true
+eventFilterTable["CHAT_MSG_WHISPER"] = true
+eventFilterTable["CHAT_MSG_YELL"] = true
 function IgnoreLevel_handler(event, name, message, args)
 	if (event == "CHAT_MSG_SYSTEM" and type(message) == "string") then
 		local name, level = parseWhoMessage(message)
@@ -272,7 +277,7 @@ function IgnoreLevel_handler(event, name, message, args)
 						showPartyInvite(name)
 					else
 						for _, messageTuple in ipairs(queue[name]["messages"]) do
-							insertMessage("CHAT_MSG_WHISPER", name, messageTuple["message"], messageTuple["args"])
+							insertMessage(messageTuple["event"], name, messageTuple["message"], messageTuple["args"])
 						end
 					end
 				end
@@ -311,7 +316,7 @@ function IgnoreLevel_handler(event, name, message, args)
 				end
 			end
 		end
-	elseif (event == "CHAT_MSG_WHISPER" and type(name) == "string" and type(message) == "string") then
+	elseif (eventFilterTable[event] and type(name) == "string" and type(message) == "string") then
 		-- Just WhiteList ElvUI history. We cannot query level if player is already offline.
 		if (name == UnitName("player")
 			or WhiteList[strlower(name)]
@@ -332,7 +337,7 @@ function IgnoreLevel_handler(event, name, message, args)
 				-- Has level, check if stale
 				if (GetTime() - tbl["time"] > cacheTime) then
 					-- stale level
-					onNewUserWhisper(name, message, args)
+					onNewUserWhisper(event, name, message, args)
 				else
 					-- can use cached level
 					if (shouldFilter(name)) then
@@ -346,7 +351,7 @@ function IgnoreLevel_handler(event, name, message, args)
 			end
 		else
 			-- New user whisper
-			onNewUserWhisper(name, message, args)
+			onNewUserWhisper(event, name, message, args)
 		end
 	else		
 		insertMessage(event, name, message, args)
