@@ -54,16 +54,16 @@ local function onNewPartyInvite(name)
 end
 
 
-local orig_StaticPopup_Show = StaticPopup_Show
+local orig_UIParent_OnEvent = UIParent_OnEvent
 local function showPartyInvite(name)
 	arg1 = name
-	orig_StaticPopup_Show("PARTY_INVITE", name)
-	local info = ChatTypeInfo["SYSTEM"];
+	orig_UIParent_OnEvent("PARTY_INVITE_REQUEST")
+	local info = ChatTypeInfo["SYSTEM"]
 	partyInviteChatWindow:AddMessage("|Hplayer:" .. name .. "|h[" .. name .. "]|h has invited you to join a group.", info.r, info.g, info.b, info.id)
 end
 
-StaticPopup_Show = function(event, ...)
-	if (IgnoreParty == 1 and event == "PARTY_INVITE") then
+UIParent_OnEvent = function(event)
+	if (IgnoreParty == 1 and event == "PARTY_INVITE_REQUEST") then
 		name = arg1
 		if (WhiteList[strlower(name)]
 			or string.len(name) < 4) then
@@ -91,7 +91,7 @@ StaticPopup_Show = function(event, ...)
 			onNewPartyInvite(arg1)
 		end
 	else
-		orig_StaticPopup_Show(event, ...)
+		orig_UIParent_OnEvent(event)
 	end
 end
 
